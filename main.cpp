@@ -37,10 +37,13 @@ bool is_exact_square(const BigInt &n) {
 
 std::pair<BigInt, BigInt> get_fermat_factor(const BigInt &n) {
   BigInt x = ceil_sqrt(n);
-  BigInt y2 = pow(x, 2) - n;
-  while (!is_exact_square(y2)) {
-    x += 1;
+  BigInt y2;
+  while (true) {
     y2 = pow(x, 2) - n;
+    if (is_exact_square(y2)) {
+      break;
+    }
+    x += 1;
   }
   BigInt y = sqrt(y2);
   return {x + y, x - y};
