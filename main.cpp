@@ -1,8 +1,14 @@
 #include <array>
+#include <atomic>
+#include <cstddef>
 #include <iostream>
+#include <mutex>
+#include <thread>
 
+#include <boost/lexical_cast.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/range/algorithm/count.hpp>
+#include <boost/range/algorithm/for_each.hpp>
 
 using BigInt = boost::multiprecision::cpp_int;
 using boost::multiprecision::pow, boost::multiprecision::sqrt;
@@ -40,6 +46,39 @@ std::pair<BigInt, BigInt> get_fermat_factor(const BigInt &n) {
   return {x + y, x - y};
 }
 
+std::pair<BigInt, BigInt> get_fermat_factor_parallel(const BigInt &n,
+                                                     const std::size_t world) {
+  std::vector<std::thread> pool;
+  pool.reserve(world);
+
+  std::atomic_bool done = false;
+  std::mutex result_mutex;
+  std::pair<BigInt, BigInt> result;
+  const auto thread_func = [&](BigInt start_x) {
+    BigInt x = std::move(start_x);
+    BigInt y2;
+    while (!done) {
+      y2 = pow(x, 2) - n;
+      if (is_exact_square(y2)) {
+        done = true;
+        const std::lock_guard lock(result_mutex);
+        BigInt y = sqrt(y2);
+        result = {x + y, x - y};
+        break;
+      }
+      x += world;
+    }
+  };
+  const BigInt start_x = ceil_sqrt(n);
+  for (std::size_t i = 0; i < world; i++) {
+    pool.emplace_back(thread_func, start_x + i);
+  }
+  boost::for_each(pool, [](auto &t) {
+    if (t.joinable())
+      t.join();
+  });
+  return result;
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -50,8 +89,19 @@ int main(int argc, char **argv) {
     std::cerr << "No input argument!" << std::endl;
     std::exit(1);
   }
+  std::size_t world = 0;
+  if (argc >= 3) {
+    world = boost::lexical_cast<std::size_t>(argv[2]);
+  }
   std::cout << "n = " << n << std::endl;
-  auto [a, b] = get_fermat_factor(n);
+  std::pair<BigInt, BigInt> result;
+  if (world <= 1) {
+    result = get_fermat_factor(n);
+  } else {
+    std::clog << "world = " << world << std::endl;
+    result = get_fermat_factor_parallel(n, world);
+  }
+  const auto [a, b] = result;
   std::cout << "a = " << a << std::endl;
   std::cout << "b = " << b << std::endl;
 }
